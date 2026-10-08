@@ -11,10 +11,13 @@ public class PortalScript : MonoBehaviour
     [SerializeField] PortalScript linkedPortal;
     public MeshRenderer screen1;
     public MeshRenderer screen2;
+    [Tooltip("How many portals deep you can see when portals are facing each other")]
+    [SerializeField, Min(0)] int portalDepth = 0;
     [Tooltip("Resolution of the portal will be (screen / this)")]
     [SerializeField, Min(1)] float portalQuality = 1;
     [SerializeField] float screenDistanceMargin = 0.07f;
     Camera portalCamera;
+    List<Camera> portalDepthCameras;
     Camera playerCamera;
     RenderTexture portalTexture;
 
@@ -26,7 +29,16 @@ public class PortalScript : MonoBehaviour
         playerCamera = GameObject.FindWithTag("Player").GetComponentInChildren<Camera>();
         portalCamera.enabled = false;
         trackedTravellers = new();
-        SetScreensOffset();
+        portalDepthCameras = new();
+        CreatePortalDepthCameras();
+    }
+
+    void CreatePortalDepthCameras()
+    {
+        for (int i = 0; i < portalDepth; i++)
+        {
+            portalDepthCameras.Add(Instantiate(portalCamera, transform));
+        }
     }
 
     void SetScreensOffset()
@@ -85,6 +97,11 @@ public class PortalScript : MonoBehaviour
             portalTexture = new RenderTexture(Mathf.RoundToInt(Screen.width / portalQuality), Mathf.RoundToInt(Screen.height / portalQuality), 24);
             portalTexture.name = name + " portalTexture";
             portalCamera.targetTexture = portalTexture;
+            foreach (Camera camera in portalDepthCameras)
+            {
+                camera.targetTexture = portalTexture;
+            }
+
             linkedPortal.screen1.material.SetTexture("_MainTex", portalTexture);
             linkedPortal.screen2.material.SetTexture("_MainTex", portalTexture);
         }
@@ -98,8 +115,6 @@ public class PortalScript : MonoBehaviour
 
     private void Update()
     {
-        SetScreensOffset();
-
         for (int i = 0; i < trackedTravellers.Count; i++)
         {
             PortalTraveller traveller = trackedTravellers[i];
@@ -147,18 +162,25 @@ public class PortalScript : MonoBehaviour
         }
     }
 
+    void SetFallback(bool useFallback)
+    {
+        float useIt = useFallback ? 1 : 0;
+        linkedPortal.screen1.material.SetFloat("_UseFallback", useIt);
+        linkedPortal.screen2.material.SetFloat("_UseFallback", useIt);
+    }
+
     //implements oblique cliping as explained here https://www.youtube.com/watch?v=cWpFZbjtSQg at 13:14
-    void SetNearClipPlane()
+    void SetNearClipPlane(Camera camera)
     {
         Transform clipPlane = transform;
-        int dot = Math.Sign(Vector3.Dot(clipPlane.forward, transform.position - portalCamera.transform.position));
+        int dot = Math.Sign(Vector3.Dot(clipPlane.forward, transform.position - camera.transform.position));
 
-        Vector3 cameraSpacePos = portalCamera.worldToCameraMatrix.MultiplyPoint(clipPlane.position); 
-        Vector3 cameraSpaceNormal = portalCamera.worldToCameraMatrix.MultiplyVector(clipPlane.forward) * dot;
+        Vector3 cameraSpacePos = camera.worldToCameraMatrix.MultiplyPoint(clipPlane.position);
+        Vector3 cameraSpaceNormal = camera.worldToCameraMatrix.MultiplyVector(clipPlane.forward) * dot;
         float cameraSpaceDistance = -Vector3.Dot(cameraSpacePos, cameraSpaceNormal);
         Vector4 clipPlaneCameraSpace = new Vector4(cameraSpaceNormal.x, cameraSpaceNormal.y, cameraSpaceNormal.z, cameraSpaceDistance);
 
-        portalCamera.projectionMatrix = playerCamera.CalculateObliqueMatrix(clipPlaneCameraSpace);
+        camera.projectionMatrix = playerCamera.CalculateObliqueMatrix(clipPlaneCameraSpace);
     }
 
     private void Render(ScriptableRenderContext context, Camera camera)
@@ -169,6 +191,7 @@ public class PortalScript : MonoBehaviour
             UpdateSlice(trackedTravellers[i]);
 
         AvoidClipping();
+        SetScreensOffset();
 
         if (!VisibleFromCamera(linkedPortal.screen1, playerCamera)) return;
 
@@ -176,13 +199,44 @@ public class PortalScript : MonoBehaviour
         screen2.enabled = false;
         CreatePortalTexture();
 
+        //----set camera positions
         // with (linkedPortal.transform.worldToLocalMatrix * playerCamera.localToWorldMatrix) you get a relative position,
         // and then by multiplying that with (transform.localToWorldMatrix) you place it back to world space but relative to this portal
         Matrix4x4 m = transform.localToWorldMatrix * linkedPortal.transform.worldToLocalMatrix * playerCamera.transform.localToWorldMatrix;
         portalCamera.transform.SetPositionAndRotation(m.GetColumn(3), m.rotation);
-        SetNearClipPlane();
+        SetNearClipPlane(portalCamera);
+        for (int i = 0; i < portalDepthCameras.Count; i++)
+        {
+            Camera previousCamera = i == 0 ? portalCamera : portalDepthCameras[i - 1];
+            Matrix4x4 mDepth = transform.localToWorldMatrix * linkedPortal.transform.worldToLocalMatrix * previousCamera.transform.localToWorldMatrix;
+            portalDepthCameras[i].transform.SetPositionAndRotation(mDepth.GetColumn(3), mDepth.rotation);
+            SetNearClipPlane(portalDepthCameras[i]);
+        }
 
+        //----render camera's
         linkedPortal.AvoidClipping(portalCamera.transform.position);
+        int visibleDepth = portalDepth;
+        for (int i = portalDepthCameras.Count - 1; i >= 0; i--)
+        {
+            if (!VisibleFromCamera(linkedPortal.screen1, portalDepthCameras[i]))
+                visibleDepth--;
+        }
+        bool deepestCamera = true;
+        //render in backwards order for correct effect
+        for (int i = portalDepth - 1; i >= 0; i--)
+        {
+            //if statement instead of changing for loop for debugging purposes
+            if (i > visibleDepth)
+            {
+                //Debug.Log("Skipped at depth: " + (i + 1) + "   " + name);
+                continue;
+            }
+            SetFallback(deepestCamera);
+            deepestCamera = false;
+            UniversalRenderPipeline.SubmitRenderRequest(portalDepthCameras[i], new UniversalRenderPipeline.SingleCameraRequest());
+        }
+
+        SetFallback(false);
         UniversalRenderPipeline.SubmitRenderRequest(portalCamera, new UniversalRenderPipeline.SingleCameraRequest());
         linkedPortal.AvoidClipping(playerCamera.transform.position);
 

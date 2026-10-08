@@ -23,12 +23,17 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - _FallbackTex:
+        m_Texture: {fileID: 2800000, guid: 4b851b9a397821b4a9e646184ac4d42e, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _MainTex:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
-    m_Floats: []
+    m_Floats:
+    - _UseFallback: 0
     m_Colors: []
   m_BuildTextureStacks: []
   m_AllowLocking: 1

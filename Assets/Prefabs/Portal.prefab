@@ -808,6 +808,7 @@ MonoBehaviour:
   linkedPortal: {fileID: 0}
   screen1: {fileID: 1049282361290878586}
   screen2: {fileID: 6243836098866862555}
+  portalDepth: 5
   portalQuality: 1
   screenDistanceMargin: 0.07
 --- !u!1 &9218613449354679695
